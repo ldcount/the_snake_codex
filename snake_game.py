@@ -22,6 +22,7 @@ class Snake(GameObject):
         super().__init__(x, y, size, (0, 200, 0))
         # Start with exactly one segment (head only)
         self.segments: list[tuple[int, int]] = [(x, y)]
+        self.segments: list[tuple[int, int]] = [(x, y), (x - size, y), (x - 2 * size, y)]
         self.dx = size
         self.dy = 0
         self.pending_growth = 0
@@ -48,21 +49,12 @@ class Snake(GameObject):
         else:
             self.segments.pop()
 
-        if self.segments:
-            self.x, self.y = self.segments[0]
+        self.x, self.y = self.segments[0]
 
     def grow(self) -> None:
         self.pending_growth += 1
 
-    def shorten(self) -> None:
-        if self.segments:
-            self.segments.pop()
-        if self.segments:
-            self.x, self.y = self.segments[0]
-
     def collides_with_self(self) -> bool:
-        if len(self.segments) < 2:
-            return False
         return self.segments[0] in self.segments[1:]
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -73,7 +65,7 @@ class Snake(GameObject):
 
 class Rock(GameObject):
     def __init__(self, x: int, y: int, size: int):
-        super().__init__(x, y, size, (90, 90, 90))
+        super().__init__(x, y, size, (80, 80, 80))
 
 
 class Apple(GameObject):
@@ -85,7 +77,6 @@ class SnakeGame:
     WIDTH = 640
     HEIGHT = 490
     CELL = 20
-    ROCK_COUNT = 3
     MOVE_INTERVAL_MS = 120
 
     def __init__(self):
@@ -93,83 +84,49 @@ class SnakeGame:
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
         pygame.display.set_caption("Snake")
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("arial", 28, bold=True)
-        self.small_font = pygame.font.SysFont("arial", 22)
+        self.font = pygame.font.SysFont("arial", 36, bold=True)
+        self.small_font = pygame.font.SysFont("arial", 20)
 
-        # Keep gameplay strictly on the 20x20 grid.
-        self.play_height = (self.HEIGHT // self.CELL) * self.CELL
         self.grid_positions = [
             (x, y)
             for x in range(0, self.WIDTH, self.CELL)
-            for y in range(0, self.play_height, self.CELL)
+            for y in range(0, self.HEIGHT, self.CELL)
         ]
 
         self.running = True
         self.last_move = 0
         self.score = 0
 
-        self.snake = self._create_snake()
-        self.apple = Apple(0, 0, self.CELL)
-        self.rocks: list[Rock] = []
-        self._reset_objects()
+        self.snake = Snake(self.WIDTH // 2, self.HEIGHT // 2, self.CELL)
+        self.rocks = self._create_rocks(8)
+        self.apple = self._spawn_apple()
 
-    def _create_snake(self) -> Snake:
-        # Center snapped to grid to avoid any visual shift.
-        start_x = (self.WIDTH // 2 // self.CELL) * self.CELL
-        start_y = (self.play_height // 2 // self.CELL) * self.CELL
-        return Snake(start_x, start_y, self.CELL)
+    def _create_rocks(self, count: int) -> list[Rock]:
+        rocks = []
+        occupied = set(self.snake.segments)
 
-    def _blocked_positions(self) -> set[tuple[int, int]]:
-        blocked = set(self.snake.segments)
-        blocked.update((rock.x, rock.y) for rock in self.rocks)
-        blocked.add((self.apple.x, self.apple.y))
-        return blocked
+        while len(rocks) < count:
+            pos = random.choice(self.grid_positions)
+            if pos in occupied:
+                continue
+            occupied.add(pos)
+            rocks.append(Rock(pos[0], pos[1], self.CELL))
 
-    def _random_free_position(self, blocked: set[tuple[int, int]]) -> tuple[int, int]:
-        free = [pos for pos in self.grid_positions if pos not in blocked]
-        return random.choice(free)
+        return rocks
 
     def _spawn_apple(self) -> Apple:
         blocked = set(self.snake.segments)
         blocked.update((rock.x, rock.y) for rock in self.rocks)
-        x, y = self._random_free_position(blocked)
+        free_positions = [pos for pos in self.grid_positions if pos not in blocked]
+        x, y = random.choice(free_positions)
         return Apple(x, y, self.CELL)
-
-    def _spawn_rocks(self) -> list[Rock]:
-        rocks: list[Rock] = []
-        blocked = set(self.snake.segments)
-        blocked.add((self.apple.x, self.apple.y))
-
-        while len(rocks) < self.ROCK_COUNT:
-            x, y = self._random_free_position(blocked)
-            blocked.add((x, y))
-            rocks.append(Rock(x, y, self.CELL))
-
-        return rocks
-
-    def _ensure_rock_count(self) -> None:
-        blocked = set(self.snake.segments)
-        blocked.add((self.apple.x, self.apple.y))
-        blocked.update((rock.x, rock.y) for rock in self.rocks)
-
-        while len(self.rocks) < self.ROCK_COUNT:
-            x, y = self._random_free_position(blocked)
-            blocked.add((x, y))
-            self.rocks.append(Rock(x, y, self.CELL))
-
-        if len(self.rocks) > self.ROCK_COUNT:
-            self.rocks = self.rocks[: self.ROCK_COUNT]
-
-    def _reset_objects(self) -> None:
-        self.snake = self._create_snake()
-        self.rocks = []
-        self.apple = self._spawn_apple()
-        self.rocks = self._spawn_rocks()
 
     def _reset_round(self) -> None:
         self._show_game_over()
+        self.snake = Snake(self.WIDTH // 2, self.HEIGHT // 2, self.CELL)
+        self.rocks = self._create_rocks(8)
+        self.apple = self._spawn_apple()
         self.score = 0
-        self._reset_objects()
         self.last_move = pygame.time.get_ticks()
 
     def _show_game_over(self) -> None:
@@ -178,12 +135,15 @@ class SnakeGame:
         self.screen.blit(overlay, (0, 0))
 
         text = self.font.render("GAME OVER", True, (255, 255, 255))
-        sub = self.small_font.render("Restarting...", True, (220, 220, 220))
+        sub = self.small_font.render("Restarting...", True, (210, 210, 210))
 
-        self.screen.blit(text, text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2 - 16)))
-        self.screen.blit(sub, sub.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2 + 20)))
+        text_rect = text.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2 - 16))
+        sub_rect = sub.get_rect(center=(self.WIDTH // 2, self.HEIGHT // 2 + 20))
+
+        self.screen.blit(text, text_rect)
+        self.screen.blit(sub, sub_rect)
         pygame.display.flip()
-        pygame.time.delay(1200)
+        pygame.time.delay(1400)
 
     def _handle_input(self) -> None:
         for event in pygame.event.get():
@@ -225,6 +185,7 @@ class SnakeGame:
         if not self.snake.segments:
             self._reset_round()
             return
+        self.snake.move(self.WIDTH, self.HEIGHT)
 
         if self.snake.collides_with_self():
             self._reset_round()
@@ -244,6 +205,12 @@ class SnakeGame:
         for x in range(0, self.WIDTH + 1, self.CELL):
             pygame.draw.line(self.screen, (30, 30, 30), (x, 0), (x, self.play_height))
         for y in range(0, self.play_height + 1, self.CELL):
+    def _draw(self) -> None:
+        self.screen.fill((20, 20, 20))
+
+        for x in range(0, self.WIDTH, self.CELL):
+            pygame.draw.line(self.screen, (30, 30, 30), (x, 0), (x, self.HEIGHT))
+        for y in range(0, self.HEIGHT, self.CELL):
             pygame.draw.line(self.screen, (30, 30, 30), (0, y), (self.WIDTH, y))
 
         self.apple.draw(self.screen)
@@ -253,6 +220,8 @@ class SnakeGame:
 
         hud = self.small_font.render(f"Score: {self.score}    Esc: Quit", True, (225, 225, 225))
         self.screen.blit(hud, (10, 8))
+        hud = self.small_font.render(f"Score: {self.score}    Esc: Quit", True, (210, 210, 210))
+        self.screen.blit(hud, (8, self.HEIGHT - 24))
 
         pygame.display.flip()
 

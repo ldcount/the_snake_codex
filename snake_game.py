@@ -20,18 +20,25 @@ class GameObject:
 class Snake(GameObject):
     def __init__(self, x: int, y: int, size: int):
         super().__init__(x, y, size, (0, 200, 0))
+        # Start with exactly one segment (head only)
+        self.segments: list[tuple[int, int]] = [(x, y)]
         self.segments: list[tuple[int, int]] = [(x, y), (x - size, y), (x - 2 * size, y)]
         self.dx = size
         self.dy = 0
         self.pending_growth = 0
 
     def set_direction(self, dx: int, dy: int) -> None:
+        if not self.segments:
+            return
         if (dx, dy) == (-self.dx, -self.dy):
             return
         self.dx = dx
         self.dy = dy
 
     def move(self, width: int, height: int) -> None:
+        if not self.segments:
+            return
+
         head_x, head_y = self.segments[0]
         new_x = (head_x + self.dx) % width
         new_y = (head_y + self.dy) % height
@@ -154,12 +161,30 @@ class SnakeGame:
                 elif event.key == pygame.K_RIGHT:
                     self.snake.set_direction(self.CELL, 0)
 
+    def _handle_rock_collision(self) -> None:
+        if not self.snake.segments:
+            return
+
+        head = self.snake.segments[0]
+        hit_index = next((i for i, rock in enumerate(self.rocks) if (rock.x, rock.y) == head), None)
+
+        if hit_index is not None:
+            self.snake.shorten()
+            self.rocks.pop(hit_index)
+            self._ensure_rock_count()
+
     def _update(self) -> None:
         now = pygame.time.get_ticks()
         if now - self.last_move < self.MOVE_INTERVAL_MS:
             return
 
         self.last_move = now
+        self.snake.move(self.WIDTH, self.play_height)
+
+        self._handle_rock_collision()
+        if not self.snake.segments:
+            self._reset_round()
+            return
         self.snake.move(self.WIDTH, self.HEIGHT)
 
         if self.snake.collides_with_self():
@@ -171,6 +196,15 @@ class SnakeGame:
             self.score += 1
             self.apple = self._spawn_apple()
 
+        self._ensure_rock_count()
+
+    def _draw(self) -> None:
+        self.screen.fill((18, 18, 18))
+
+        # Draw grid only in gameplay area.
+        for x in range(0, self.WIDTH + 1, self.CELL):
+            pygame.draw.line(self.screen, (30, 30, 30), (x, 0), (x, self.play_height))
+        for y in range(0, self.play_height + 1, self.CELL):
     def _draw(self) -> None:
         self.screen.fill((20, 20, 20))
 
@@ -184,6 +218,8 @@ class SnakeGame:
             rock.draw(self.screen)
         self.snake.draw(self.screen)
 
+        hud = self.small_font.render(f"Score: {self.score}    Esc: Quit", True, (225, 225, 225))
+        self.screen.blit(hud, (10, 8))
         hud = self.small_font.render(f"Score: {self.score}    Esc: Quit", True, (210, 210, 210))
         self.screen.blit(hud, (8, self.HEIGHT - 24))
 
